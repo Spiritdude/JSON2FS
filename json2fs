@@ -1,0 +1,285 @@
+#!/usr/bin/perl
+
+# == SQL 2 Filesystem Abstraction (FS Everything) ==
+#  written by Rene K. Mueller <spiritdude@gmail.com>
+#
+# License: MIT (see LICENSE file)
+#
+my $APPNAME = "JSON2FS (json2fs)";
+my $VERSION = "0.0.1";
+#
+# License: MIT, Copyright 2020 by Rene K. Mueller (see LICENSE file)
+#
+# Description:
+#  % json2fs test.json
+#  % cd test/
+#  % ls
+#
+# History:
+# 2020/04/20: 0.0.1: the idea is born, reusing my code from sql2fs, read only working
+
+use Fuse;
+use POSIX qw(ENOENT EISDIR EINVAL O_WRONLY);
+use JSON;
+use File::Slurp 'read_file';
+use Encode;
+use Digest::SHA 'sha256_hex';
+
+use strict;
+use utf8;
+use open qw(:std :utf8);
+
+use constant {
+    T_FILE => 0100,
+    T_DIR => 0040
+};
+
+my $s2f = { v => 'verbose' };
+
+my $arg = {
+   verbose => 0,
+   hash_prefix => "x",
+   content_max => 16*1024
+};
+
+my $dbh;                   # -- database handle
+my $item;                  # -- item/file metadata cache
+my $st_time = time();
+
+my @a;
+foreach(@ARGV) {
+   if(/^-(\w+)$/) {
+      $arg->{$s2f->{$_}}++ foreach(split(/|/,$1));
+      next;
+   }
+   $arg->{$1}++, next if(/^--(\w+)$/);
+   $arg->{$1} = $2, next if(/^--(\w+)=(.*)$/);
+   push(@a,$_);
+}
+@ARGV = @a;
+
+if($arg->{help} || @ARGV!=1) {
+   print "USAGE $APPNAME $VERSION: [<options>] <database>
+   options:
+      --verbose            increase verbosity
+        -v or -vvvv           \"       \"
+      --version            print version and exit
+      --allow_other        permit other users to use mount (add 'user_allow_other' in /etc/fuse.conf)
+      --hash_prefix=<p>    define hash prefix (default: $arg->{hash_prefix})
+
+   examples:
+      % json2fs test.json
+      % cd test/
+      % ls 
+
+   see also https://github.com/Spiritdude/JSON2FS for more information
+   
+";
+   exit 0;
+}
+
+if($arg->{version}) {
+   print "$APPNAME $VERSION\n";
+   exit 0;
+}
+
+my $mount = $arg->{json} = shift(@ARGV);    # -- database becomes mount point
+
+unless(-f $arg->{json}) {
+   print "$APPNAME: ERROR: file not found: '$arg->{json}'\n";
+   exit -1;
+}
+
+my $data = from_json(read_file($arg->{json}));
+
+$st_time = (stat($arg->{json}))[9];
+
+$mount =~ s/.+\///, $mount =~ s/\.\w+$//;    # -- mount point, remove extension e.g. .json from filename
+
+mkdir $mount;
+
+die "$APPNAME: $!\n" unless(-d $mount);
+
+fork && exit;
+
+
+$SIG{__DIE__} = sub {
+   print "$APPNAME: exited.\n";
+   print "$APPNAME: HINT: sudo umount $mount/\n";
+   exit -1;
+};
+
+Fuse::main( 
+   mountpoint => $mount, 
+   getattr => \&my_getattr,
+   getdir => \&my_getdir,
+   open => \&my_open, 
+   read => \&my_read, 
+   release => \&my_close,
+   utime => sub { return 0 },
+   mountopts => $arg->{allow_other} ? "allow_other":"",
+   threaded => 0
+);
+
+# ------------------------------------------------------------------------------------------------------------------
+
+sub my_open {
+   print "INF: open: ".to_json(\@_,{canonical=>1})."\n" if($arg->{verbose});
+   my($path,$mode) = @_;
+   $path =~ s#/##;
+   my $fh;
+   return 0,$fh;
+}
+
+sub my_close {
+   print "INF: close: ".to_json(\@_,{canonical=>1})."\n" if($arg->{verbose});
+   my($path,$flags,$fh) = @_;
+   $path =~ s#/##;
+   return 0;
+}
+
+sub my_read {
+   print "INF: read: ".to_json(\@_,{canonical=>1})."\n" if($arg->{verbose});
+   my($path,$n,$off,$fh) = @_;
+   $path =~ s#/##;
+   my(@p) = split(/\//,$path);
+   my $e = dot($data,\@p);
+   #return substr(to_json($e,{pretty=>1,canonical=>1}),$off,$n);
+   return $e ? substr($e,$off,$n) : -1;
+}
+
+sub my_getattr {
+   print "INF: getattr: ".to_json(\@_,{canonical=>1})."\n" if($arg->{verbose});
+   my($path) = @_;
+
+   $path =~ s#/##;
+   $path = decode('utf-8',$path);
+
+   my(@p) = split(/\//,$path);
+
+   print "INF: path: ",join(",",map { "\"$_\"" } @p),"\n" if($arg->{verbose}>1);
+
+   my($dev, $ino, $mode, $nlink, $uid, $gid, $rdev, $size, $atime, $mtime, $ctime, $blksize, $blocks); # = stat(".");
+
+   ($dev, $ino, $rdev, $blocks, $nlink, $blksize) = (0, 0, 0, 1, 1, 1024);
+
+   my $context = Fuse::fuse_get_context();
+   my $type = T_DIR;
+   my $perm = 0777;
+   $size = 0;
+
+   if($p[$#p]=~/^\.{1,2}?$/) {   # . and .. are valid always
+      ;
+   } elsif(@p<=0) {           # /
+      ;
+   } else {
+      my $e = dot($data,\@p);
+      $type = ref($e) ? T_DIR : T_FILE;
+      $size = length($e) if(defined $e && !ref($e));
+   }
+
+   print "type: $type\n" if($arg->{verbose}>2);
+   $atime = time();
+   $mtime = $ctime = $st_time;
+   $mode = ($type << 9) | $perm;
+   $uid = $context->{uid};
+   $gid = $context->{gid};
+   print "valid file: ",
+      join(",", $dev, $ino, $mode, $nlink, $uid, $gid, $rdev, $size, $atime, $mtime, $ctime, $blksize, $blocks ),"\n" if($arg->{verbose}>3);
+   return ($dev, $ino, $mode, $nlink, $uid, $gid, $rdev, $size, $atime, $mtime, $ctime, $blksize, $blocks);
+}
+
+sub my_getdir {
+   print "INF: getdir: ".to_json(\@_,{canonical=>1})."\n" if($arg->{verbose});
+   my($path) = @_;
+   $path =~ s#/##;
+   
+   my @d;
+
+   push(@d,'.','..');      # -- must be there at all times - we are in UNIX world
+
+   my(@p) = split(/\//,$path);
+
+   my $e = dot($data,\@p);
+   my $n = 0;
+   
+   push(@d,sort keys %$e) if(ref($e)eq'HASH');
+   push(@d,map { $n++ } @$e) if(ref($e)eq'ARRAY');
+
+   @d = sort map { encode('utf-8',$_) } @d;
+
+   push(@d,0);
+   return @d;
+}
+
+sub dot {
+   print "INF: dot: ".to_json(\@_,{canonical=>1})."\n" if($arg->{verbose});
+   my($d,$pa) = @_;
+   foreach(@$pa) {
+      print "INF:  next step '$_'\n" if($arg->{verbose}>1);
+      $d = $d->{$_}, next if(ref($d) eq 'HASH');
+      $d = $d->[$_], next if(ref($d) eq 'ARRAY');
+   }
+   print "INF:  => ".(ref($d)?to_json($d,{canonical=>1}):"'$d'")."\n" if($arg->{verbose}>1);
+   return $d;
+}
+
+
+# -- toFilename: transform content into a valid UNIX filename
+#  - issues:
+#     - ideally all transformation should be reversible
+#     - truncate is non-reversible
+#     - how to determine if transformation was actually done?
+#        - keep track of it internally with a cache
+sub toFilename {
+   my($d) = @_;
+   my $d0 = $d;
+   my $sz;
+   my $alt;
+   
+   if(0) {
+      $alt++ if($d =~ s/\n/\\n/g);
+      $alt++ if($d =~ s/\r/\\r/g);
+      if($d =~ /[\x00-\x1f]/) {       # -- non-printable content?
+         $d =~ s/([\x00-\x1f])/sprintf("x%02x",ord($1))/eg;
+         $alt++;
+      }
+      if(length($d)>128) {            # -- we truncate, but . . . we need to know, our query needs to be truncated as well
+         $d = substr($d,0,126)."..";
+         $sz = length($d);
+         $alt++;
+         $item->{$d}->{size} = $sz;
+      }
+   } else {
+      if($d=~/[\x00-\x1f]/ || length($d)>128) {
+         $d = $arg->{hash_prefix} . sha256_hex($d0);
+         $item->{$d}->{type} = 'sha256';
+         $d0 = substr($d0,0,$arg->{content_max}) if(length($d0)>$arg->{content_max});
+         $item->{$d}->{content} = $d0;
+      }
+   }
+   return $d;
+}
+
+# -- fromFilename: transform from valid UNIX filename back to content
+#    - how to determine if transformation was actually done?
+#      - look up some cache to determine such
+sub fromFilename {
+   my($d) = @_;
+   my $d0 = $d;
+   my $alt;
+   if(0) {
+      if(0 && $d =~ /x[0-9a-fA-F]{2}/) {
+         $d =~ s/x([0-9a-fA-F]{2})/sprintf("%c",hex($1))/eg;
+         $alt++;
+      }
+      $alt++ if($d =~ s/\\n/\n/g);
+      $alt++ if($d =~ s/\\r/\r/g);
+   } else {
+      if(substr($d,0,1) eq $arg->{hash_prefix} && $item->{$d}->{type} eq 'sha256') {
+         $d = $item->{$d}->{content};
+      }
+   }
+   return $d;
+}
+
