@@ -35,7 +35,7 @@ use constant {
     T_DIR => 0040
 };
 
-my $s2f = { v => 'verbose' };
+my $s2f = { v => 'verbose', r => "read_only" };
 
 my $arg = {
    verbose => 0,
@@ -45,7 +45,7 @@ my $arg = {
 
 my $dbh;                   # -- database handle
 my $item;                  # -- item/file metadata cache
-my $st_time = time();
+my $m_time = time();
 
 my @a;
 foreach(@ARGV) {
@@ -66,6 +66,8 @@ if($arg->{help} || @ARGV!=1) {
         -v or -vvvv           \"       \"
       --version            print version and exit
       --allow_other        permit other users to use mount (add 'user_allow_other' in /etc/fuse.conf)
+      --read_only          make it read only, don't write back to JSON file
+        -r 
       --hash_prefix=<p>    define hash prefix (default: $arg->{hash_prefix})
 
    examples:
@@ -92,8 +94,9 @@ unless(-f $arg->{json}) {
 }
 
 my $data = from_json(read_file($arg->{json}));
+my $changed = 0;
 
-$st_time = (stat($arg->{json}))[9];
+$m_time = (stat($arg->{json}))[9];
 
 $mount =~ s/.+\///, $mount =~ s/\.\w+$//;    # -- mount point, remove extension e.g. .json from filename
 
@@ -161,7 +164,7 @@ sub my_getattr {
 
    print "type: $type\n" if($arg->{verbose}>2);
    $atime = time();
-   $mtime = $ctime = $st_time;
+   $mtime = $ctime = $m_time;
    $mode = ($type << 9) | $perm;
    $uid = $context->{uid};
    $gid = $context->{gid};
@@ -207,9 +210,11 @@ sub my_create {
    my $e = dot($data,\@p);
    if(ref($e)eq'HASH') {
       $e->{$fname} = "";
+      $changed++;
    } elsif(ref($e)eq'ARRAY') {
       my $i = $fname*1;
       $e->[$i] = "";
+      $changed++;
    } else {
       return -1;
    }
@@ -228,7 +233,25 @@ sub my_close {
    print "INF: close: ".to_json(\@_,{canonical=>1})."\n" if($arg->{verbose});
    my($path,$flags,$fh) = @_;
    $path =~ s#/##;
+   my_flush();
    return 0;
+}
+
+sub my_flush {
+   if($changed && !$arg->{read_only}) {
+      if(open(my $fh,">",$arg->{json}.".new")) {
+         print $fh to_json($data,{pretty=>1,canonical=>1});
+         close $fh;
+         if(!rename($arg->{json}.".new",$arg->{json})) {
+            print STDERR "$APPNAME: could not rename $arg->{json}.new to $arg->{json}: $!\n";
+            exit -1;
+         }
+      } else {
+         print STDERR "$APPNAME: could not write to $arg->{json}.new: $!\n";
+         exit -1;
+      }
+   }
+   $changed = 0;
 }
 
 sub my_read {
@@ -253,10 +276,12 @@ sub my_write {
    if(ref($e)eq'HASH') {
       $e->{$fname} = "" unless(defined $e->{$fname});
       substr($e->{$fname},$off,$n,$buff);
+      $changed++;
    } elsif(ref($e)eq'ARRAY') {
       my $i = $fname*1;
       $e->[$i] = "" unless(defined $e->[$i]);
       substr($e->[$i],$off,$n,$buff);
+      $changed++;
    } else {
       return -1;
    }
@@ -272,9 +297,11 @@ sub my_truncate {
    my $e = dot($data,\@p);
    if(ref($e)eq'HASH') {
       $e->{$fname} = substr($e->{$fname},0,$off);
+      $changed++;
    } elsif(ref($e)eq'ARRAY') {
       my $i = $fname*1;
       $e->[$i] = substr($e->[$i],0,$off);
+      $changed++;
    } else {
       return -1;
    }
@@ -291,12 +318,15 @@ sub my_mkdir {
    my $type = $fname =~ s/\@$// ? 'ARRAY' : 'HASH';
    if(ref($e)eq'HASH') {
       $e->{$fname} = $type eq 'HASH' ? { } : [ ];
+      $changed++;
    } elsif(ref($e)eq'ARRAY') {
       my $i = $fname*1;
       $e->[$i] = $type eq 'HASH' ? { } : [ ];
+      $changed++;
    } else {
       return -1;
    }
+   my_flush();
    return 0;
 }
 

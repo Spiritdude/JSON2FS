@@ -8,8 +8,7 @@ Mapping JSON to a file system . . . because it's possible, and because how it sh
 % more test.json
 {  
    "a": "hello world",
-   "b": {
-   },
+   "b": { },
    "c": "something else",
    "d": [
       "test",
@@ -46,10 +45,11 @@ God
 ## Support
 - Debian/Ubuntu 18.04/LTS
 - read and write:
-  - writing:
+  - writing (enabled by default):
     - `mkdir dir` => { }
-    - `mkdir @dir` => [ ]
-      - sub-items referenced by 0, 1, ..
+    - `mkdir dir@` => [ ]
+      - sub-items referenced by `0`, `1`, ..
+  - read-only: use `-r` or `--read_only` switch
 
 ## Limitations
 - highly experimental (unstable)
@@ -76,7 +76,29 @@ On Debian/Ubuntu 18.04:
 ```
 Note: it just installs `json2fs` to your local `~/bin/`.
 
-## Use 
+## Usage
+
+```
+USAGE JSON2FS (json2fs) 0.0.2: [<options>] <database>
+   options:
+      --verbose            increase verbosity
+        -v or -vvvv           "       "
+      --version            print version and exit
+      --allow_other        permit other users to use mount (add 'user_allow_other' in /etc/fuse.conf)
+      --read_only          make it read only, don't write back to JSON file
+        -r 
+      --hash_prefix=<p>    define hash prefix (default: x)
+
+   examples:
+      % json2fs test.json
+      % cd test/
+      % ls 
+
+   see also https://github.com/Spiritdude/JSON2FS for more information
+
+```
+
+## Real World Usage
 ```
 % ./json2fs test.json
 

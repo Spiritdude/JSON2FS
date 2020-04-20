@@ -1,0 +1,15 @@
+{
+   "a": "hello world",
+   "b": { },
+   "c": "something else",
+   "d": [
+      "test",
+      { 
+         "a": "1212", 
+         "b": { 
+            "even deeper": 42 
+         } 
+      }
+   ],
+   "e": "last entry"
+}
