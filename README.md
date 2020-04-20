@@ -36,20 +36,29 @@ hello world
 % more d/1/b/even\ deeper
 42
 
+% echo "God" > d/1/b/even\ deeper
+
+% more d/1/b/even\ deeper
+God
+
 ```
 
 ## Support
 - Debian/Ubuntu 18.04/LTS
+- read and write:
+  - writing:
+    - `mkdir dir` => { }
+    - `mkdir @dir` => [ ]
+      - sub-items referenced by 0, 1, ..
 
 ## Limitations
 - highly experimental (unstable)
-- read only (see next "Todo")
 
 ## Todo
 - content which clashes with UNIX filename notion:
   - large or long content
   - \r \n or general non-printable content (e.g. binary)
-- "write" support
+- ~~"write" support~~: added with 0.0.2
 - deal with huge JSON datasets (and long wait times):
   
 ## Download

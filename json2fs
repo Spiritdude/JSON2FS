@@ -6,7 +6,7 @@
 # License: MIT (see LICENSE file)
 #
 my $APPNAME = "JSON2FS (json2fs)";
-my $VERSION = "0.0.1";
+my $VERSION = "0.0.2";
 #
 # License: MIT, Copyright 2020 by Rene K. Mueller (see LICENSE file)
 #
@@ -16,6 +16,7 @@ my $VERSION = "0.0.1";
 #  % ls
 #
 # History:
+# 2020/04/20: 0.0.2: early writing support
 # 2020/04/20: 0.0.1: the idea is born, reusing my code from sql2fs, read only working
 
 use Fuse;
@@ -102,7 +103,6 @@ die "$APPNAME: $!\n" unless(-d $mount);
 
 fork && exit;
 
-
 $SIG{__DIE__} = sub {
    print "$APPNAME: exited.\n";
    print "$APPNAME: HINT: sudo umount $mount/\n";
@@ -113,15 +113,108 @@ Fuse::main(
    mountpoint => $mount, 
    getattr => \&my_getattr,
    getdir => \&my_getdir,
+   create => \&my_create,
    open => \&my_open, 
    read => \&my_read, 
+   write => \&my_write,
+   truncate => \&my_truncate,
    release => \&my_close,
+   mkdir => \&my_mkdir,
    utime => sub { return 0 },
    mountopts => $arg->{allow_other} ? "allow_other":"",
    threaded => 0
 );
 
 # ------------------------------------------------------------------------------------------------------------------
+
+sub my_getattr {
+   print "INF: getattr: ".to_json(\@_,{canonical=>1})."\n" if($arg->{verbose});
+   my($path) = @_;
+
+   $path =~ s#/##;
+   $path =~ s/\@$//;
+   $path = decode('utf-8',$path);
+
+   my(@p) = split(/\//,$path);
+
+   print "INF: path: ",join(",",map { "\"$_\"" } @p),"\n" if($arg->{verbose}>1);
+
+   my($dev, $ino, $mode, $nlink, $uid, $gid, $rdev, $size, $atime, $mtime, $ctime, $blksize, $blocks); # = stat(".");
+
+   ($dev, $ino, $rdev, $blocks, $nlink, $blksize) = (0, 0, 0, 1, 1, 1024);
+
+   my $context = Fuse::fuse_get_context();
+   my $type = T_DIR;
+   my $perm = 0777;
+   $size = 0;
+
+   if($p[$#p]=~/^\.{1,2}?$/) {   # . and .. are valid always
+      ;
+   } elsif(@p<=0) {           # /
+      ;
+   } else {
+      my $e = dot($data,\@p);
+      $type = ref($e) ? T_DIR : T_FILE;
+      $size = length($e) if(defined $e && !ref($e));
+      return (-ENOENT()) if(!defined $e);
+   }
+
+   print "type: $type\n" if($arg->{verbose}>2);
+   $atime = time();
+   $mtime = $ctime = $st_time;
+   $mode = ($type << 9) | $perm;
+   $uid = $context->{uid};
+   $gid = $context->{gid};
+
+   print "valid file: ",
+      join(",", $dev, $ino, $mode, $nlink, $uid, $gid, $rdev, $size, $atime, $mtime, $ctime, $blksize, $blocks ),"\n" if($arg->{verbose}>3);
+
+   return ($dev, $ino, $mode, $nlink, $uid, $gid, $rdev, $size, $atime, $mtime, $ctime, $blksize, $blocks);
+}
+
+sub my_getdir {
+   print "INF: getdir: ".to_json(\@_,{canonical=>1})."\n" if($arg->{verbose});
+   my($path) = @_;
+   $path =~ s#/##;
+   
+   my @d;
+
+   push(@d,'.','..');      # -- must be there at all times - we are in UNIX world
+
+   my(@p) = split(/\//,$path);
+
+   my $e = dot($data,\@p);
+   my $n = 0;
+   
+   push(@d,sort keys %$e) if(ref($e)eq'HASH');
+   push(@d,map { $n++ } @$e) if(ref($e)eq'ARRAY');
+
+   @d = sort map { encode('utf-8',$_) } @d;
+   #@d = sort map { $_ = ref($e->{$_}) eq 'ARRAY' ? $_ . '@': $_; encode('utf-8',$_) } @d;
+
+   push(@d,0);
+
+   return @d;
+}
+
+sub my_create {
+   print "INF: create: ".to_json(\@_,{canonical=>1})."\n" if($arg->{verbose});
+   my($path,$mode,$flags) = @_;
+   $path =~ s#/##;
+   my(@p) = split(/\//,$path);
+   
+   my $fname = pop(@p);
+   my $e = dot($data,\@p);
+   if(ref($e)eq'HASH') {
+      $e->{$fname} = "";
+   } elsif(ref($e)eq'ARRAY') {
+      my $i = $fname*1;
+      $e->[$i] = "";
+   } else {
+      return -1;
+   }
+   return 0;
+}   
 
 sub my_open {
    print "INF: open: ".to_json(\@_,{canonical=>1})."\n" if($arg->{verbose});
@@ -148,69 +241,65 @@ sub my_read {
    return $e ? substr($e,$off,$n) : -1;
 }
 
-sub my_getattr {
-   print "INF: getattr: ".to_json(\@_,{canonical=>1})."\n" if($arg->{verbose});
-   my($path) = @_;
-
+sub my_write {
+   print "INF: write: ".to_json(\@_,{canonical=>1})."\n" if($arg->{verbose});
+   my($path,$buff,$off,$fh) = @_;
    $path =~ s#/##;
-   $path = decode('utf-8',$path);
-
    my(@p) = split(/\//,$path);
-
-   print "INF: path: ",join(",",map { "\"$_\"" } @p),"\n" if($arg->{verbose}>1);
-
-   my($dev, $ino, $mode, $nlink, $uid, $gid, $rdev, $size, $atime, $mtime, $ctime, $blksize, $blocks); # = stat(".");
-
-   ($dev, $ino, $rdev, $blocks, $nlink, $blksize) = (0, 0, 0, 1, 1, 1024);
-
-   my $context = Fuse::fuse_get_context();
-   my $type = T_DIR;
-   my $perm = 0777;
-   $size = 0;
-
-   if($p[$#p]=~/^\.{1,2}?$/) {   # . and .. are valid always
-      ;
-   } elsif(@p<=0) {           # /
-      ;
-   } else {
-      my $e = dot($data,\@p);
-      $type = ref($e) ? T_DIR : T_FILE;
-      $size = length($e) if(defined $e && !ref($e));
-   }
-
-   print "type: $type\n" if($arg->{verbose}>2);
-   $atime = time();
-   $mtime = $ctime = $st_time;
-   $mode = ($type << 9) | $perm;
-   $uid = $context->{uid};
-   $gid = $context->{gid};
-   print "valid file: ",
-      join(",", $dev, $ino, $mode, $nlink, $uid, $gid, $rdev, $size, $atime, $mtime, $ctime, $blksize, $blocks ),"\n" if($arg->{verbose}>3);
-   return ($dev, $ino, $mode, $nlink, $uid, $gid, $rdev, $size, $atime, $mtime, $ctime, $blksize, $blocks);
-}
-
-sub my_getdir {
-   print "INF: getdir: ".to_json(\@_,{canonical=>1})."\n" if($arg->{verbose});
-   my($path) = @_;
-   $path =~ s#/##;
-   
-   my @d;
-
-   push(@d,'.','..');      # -- must be there at all times - we are in UNIX world
-
-   my(@p) = split(/\//,$path);
-
+   my $fname = pop(@p);
    my $e = dot($data,\@p);
-   my $n = 0;
-   
-   push(@d,sort keys %$e) if(ref($e)eq'HASH');
-   push(@d,map { $n++ } @$e) if(ref($e)eq'ARRAY');
-
-   @d = sort map { encode('utf-8',$_) } @d;
-
-   push(@d,0);
-   return @d;
+   my $n = length($buff);
+   print "INF: writing @p: off=$off,n=$n,'$buff'\n" if($arg->{verbose}>2);
+   if(ref($e)eq'HASH') {
+      $e->{$fname} = "" unless(defined $e->{$fname});
+      substr($e->{$fname},$off,$n,$buff);
+   } elsif(ref($e)eq'ARRAY') {
+      my $i = $fname*1;
+      $e->[$i] = "" unless(defined $e->[$i]);
+      substr($e->[$i],$off,$n,$buff);
+   } else {
+      return -1;
+   }
+   return $n;
 }
+
+sub my_truncate {
+   print "INF: truncate: ".to_json(\@_,{canonical=>1})."\n" if($arg->{verbose});
+   my($path,$off,$fh) = @_;
+   $path =~ s#/##;
+   my(@p) = split(/\//,$path);
+   my $fname = pop(@p);
+   my $e = dot($data,\@p);
+   if(ref($e)eq'HASH') {
+      $e->{$fname} = substr($e->{$fname},0,$off);
+   } elsif(ref($e)eq'ARRAY') {
+      my $i = $fname*1;
+      $e->[$i] = substr($e->[$i],0,$off);
+   } else {
+      return -1;
+   }
+   return $off;
+}
+   
+sub my_mkdir {
+   print "INF: mkdir: ".to_json(\@_,{canonical=>1})."\n" if($arg->{verbose});
+   my($path,$mode) = @_;
+   $path =~ s#/##;
+   my(@p) = split(/\//,$path);
+   my $fname = pop(@p);
+   my $e = dot($data,\@p);
+   my $type = $fname =~ s/\@$// ? 'ARRAY' : 'HASH';
+   if(ref($e)eq'HASH') {
+      $e->{$fname} = $type eq 'HASH' ? { } : [ ];
+   } elsif(ref($e)eq'ARRAY') {
+      my $i = $fname*1;
+      $e->[$i] = $type eq 'HASH' ? { } : [ ];
+   } else {
+      return -1;
+   }
+   return 0;
+}
+
 
 sub dot {
    print "INF: dot: ".to_json(\@_,{canonical=>1})."\n" if($arg->{verbose});
