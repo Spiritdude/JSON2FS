@@ -6,7 +6,7 @@
 my $APPNAME = "JSON2FS (json2fs)";
 my $VERSION = "0.0.2";
 #
-# License: MIT, Copyright 2020 by Rene K. Mueller (see LICENSE file)
+# License: MIT (see LICENSE file)
 #
 # Description:
 #  % json2fs test.json
