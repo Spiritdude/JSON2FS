@@ -6,7 +6,7 @@ all::
 
 requirements::
 	sudo apt -y install libfuse-dev 
-	sudo cpan Fuse JSON
+	sudo cpan Fuse JSON Digest::SHA
 
 install::
 	cp json2fs ~/bin/
