@@ -138,5 +138,5 @@ Add in `/etc/fuse.conf`:
 user_allow_other
 ```
 
-so other users, like a web-server (lighttpd/apache/nginx) can access those mounted database/directories as well.
+so other users, like a web-server (lighttpd/apache/nginx) can access those mounted fs as well.
 
