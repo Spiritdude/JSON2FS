@@ -60,7 +60,7 @@ foreach(@ARGV) {
 @ARGV = @a;
 
 if($arg->{help} || @ARGV!=1) {
-   print "USAGE $APPNAME $VERSION: [<options>] <database>
+   print "USAGE $APPNAME $VERSION: [<options>] <file.json>
    options:
       --verbose            increase verbosity
         -v or -vvvv           \"       \"
@@ -68,6 +68,7 @@ if($arg->{help} || @ARGV!=1) {
       --allow_other        permit other users to use mount (add 'user_allow_other' in /etc/fuse.conf)
       --read_only          make it read only, don't write back to JSON file
         -r 
+      --mount=<dir>        enforce certain mount point
       --hash_prefix=<p>    define hash prefix (default: $arg->{hash_prefix})
 
    examples:
@@ -100,9 +101,11 @@ $m_time = (stat($arg->{json}))[9];
 
 $mount =~ s/.+\///, $mount =~ s/\.\w+$//;    # -- mount point, remove extension e.g. .json from filename
 
+$mount = $arg->{mount} if($arg->{mount});
+
 mkdir $mount;
 
-die "$APPNAME: $!\n" unless(-d $mount);
+die "$APPNAME: mount point '$mount' doesn't exist: $!\n" unless(-d $mount);
 
 fork && exit;
 
