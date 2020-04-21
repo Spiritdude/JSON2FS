@@ -79,7 +79,7 @@ Note: it just installs `json2fs` to your local `~/bin/`.
 ## Usage
 
 ```
-USAGE JSON2FS (json2fs) 0.0.2: [<options>] <database>
+USAGE JSON2FS (json2fs) 0.0.2: [<options>] <file.json>
    options:
       --verbose            increase verbosity
         -v or -vvvv           "       "
@@ -87,6 +87,7 @@ USAGE JSON2FS (json2fs) 0.0.2: [<options>] <database>
       --allow_other        permit other users to use mount (add 'user_allow_other' in /etc/fuse.conf)
       --read_only          make it read only, don't write back to JSON file
         -r 
+      --mount=<dir>        enforce certain mount point
       --hash_prefix=<p>    define hash prefix (default: x)
 
    examples:
@@ -95,7 +96,7 @@ USAGE JSON2FS (json2fs) 0.0.2: [<options>] <database>
       % ls 
 
    see also https://github.com/Spiritdude/JSON2FS for more information
-
+   
 ```
 
 ## Real World Usage
