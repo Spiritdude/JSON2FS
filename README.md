@@ -120,8 +120,10 @@ a  b/
 ./d/1/b:
 'even deeper'
 
-$ more d/1/b/even\ deeper 
+% more d/1/b/even\ deeper 
 42
+
+% nano d/1/b/even\ deeper
 ```
 
 ## Exit & Unmount
