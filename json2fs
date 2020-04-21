@@ -1,7 +1,7 @@
 #!/usr/bin/perl
 
-# == SQL 2 Filesystem Abstraction (FS Everything) ==
-#  written by Rene K. Mueller <spiritdude@gmail.com>
+# == JSON 2 Filesystem Abstraction (FS Everything) ==
+#    written by Rene K. Mueller <spiritdude@gmail.com>
 #
 my $APPNAME = "JSON2FS (json2fs)";
 my $VERSION = "0.0.2";
